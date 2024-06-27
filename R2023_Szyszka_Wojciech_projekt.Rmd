@@ -1,0 +1,302 @@
+---
+title: "Projekt końcowy Pakiet R"
+author: "Wojciech Szyszka"
+date: "2024-01-22"
+output:
+  html_document:
+    toc: yes
+    theme: readable
+    highlight: zenburn
+    df_print: paged
+    code_folding: show
+
+---
+<style>
+
+body {
+  background-color: #f8f9fa;  /* ten css ze zmianami kolorów nie działa więc już to zostawiam... */
+  margin: 0;
+}
+
+.title, .author, .date {
+  text-align: center;
+  font-size: 2em;
+}
+
+.toc {
+  padding: 10px;
+  margin-bottom: 20px;
+  margin: 0;
+}
+
+
+</style>
+
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 1. Wstęp
+
+$\textbf{R}$ - interpretowany język programowania (czyli jest implementowany w formie interpretera tak jak chociażby python, a nie kompilatora któremu odpowiadałby przykładowo C. $\textbf{R}$, dostarcza szeroką gamę technik statystycznych ( liniowe i nieliniowe modelowanie, klasycze testy statystyczne, analiza szeregów czasowych, klasyfikacja, grupowanie itd) i graficznych. Co więcej $\textbf{R}$ jest rozszerzalny za pomocą dodatkowych pakietów oraz skryptów pisanych przez użytkowników. Jest to język z którego bardzo często korzysta się w analizie danych, ale jak wskazuje poniższe źródło, jego szczególne zastosowanie pojawia się w bioinformatyce, w której okazuje się, że jest głównym językiem programowania.
+
+[Źródło: Wikipedia](https://pl.wikipedia.org/wiki/R_(j%C4%99zyk_programowania))
+
+## 2. Paproć Barnsley'a
+
+### 1. Informacje teoretyczne o algorytmie
+
+Paproć Barnsley'a to fraktal przypominający do złudzenia wszystkim świetnie znany liść paproci. Jest to obiekt który można uzyskać za pomocą zaledwie czterech przekształceń afinicznych. Aby wygenerować fraktal, należy użyć poniższych przekształceń w sposób losowy w następujących proporcjach 85:7:7:1.
+
+\$\$f\_{1}(x,y)=(0.85x+0.04y,-0.04x+0.85y+1.6)\$\$
+
+\$\$f\_{2}(x,y)=(-0.15x+0.28y,0.26x+0.24y+0.44)\$\$
+
+\$\$f\_{3}(x,y)=(0.20x-0.26y,0.23x+0.22y+1.6)\$\$
+
+\$\$f\_{4}(x,y)=(0,0.16y)\$\$
+
+Algorytm generowania tego fraktala polega na procesie iteracji współrzędnych rysowanego punktu. Początkowo losowo wybiera się współrzędne punktu, a następnie również losowo wybiera się jedno z 4 przekształceń afinicznych z odpowiednim prawdopodobieństwem, Po obliczeniu nowych współrzędnych punktu, proces powtarza się określoną liczbę razy.
+
+[Źródło: Wikipedia](https://pl.wikipedia.org/wiki/Papro%C4%87_Barnsleya)
+
+### 2. Implementacja algorytmu oraz rysunek
+
+Poniższy (ukryty) kod przedstawia funkcję w której wykonuje się algorytm oraz rysuje się nasza paproć.
+
+```{r}
+paprotka <- function(max_step) {
+  x <- numeric(max_step)
+  y <- numeric(max_step)
+  
+  for (n in 1:max_step) {
+      # Generowanie pseudolosowej liczby z przedziału [0, 1)
+      r <- runif(1) 
+      # Losowe wybierane przekształcenia afiniczne zgodne ze stosunkiem z algorytmu
+    if (r <= 0.01) {
+      x[n + 1] <- 0
+      y[n + 1] <- 0.16 * y[n]
+    } else if (r <= 0.08) {
+      x[n + 1] <- 0.2 * x[n] - 0.26 * y[n]
+      y[n + 1] <- 0.23 * x[n] + 0.22 * y[n] + 1.6
+    } else if (r <= 0.15) {
+      x[n + 1] <- -0.15 * x[n] + 0.28 * y[n]
+      y[n + 1] <- 0.26 * x[n] + 0.24 * y[n] + 0.44
+    } else {
+      x[n + 1] <- 0.85 * x[n] + 0.04 * y[n]
+      y[n + 1] <- -0.04 * x[n] + 0.85 * y[n] + 1.6
+    }
+  }
+  #Rysunek
+  plot(x, y, col = "green4", pch = ".", cex = 0.5, main = paste("N =", max_step))
+}
+```
+
+Wywołanie funkcji dla różnych wartości:
+
+```{r}
+#podział 1x4, żeby na jednym rysunku zawrzeć 4 rysunki
+par(mfrow=c(1,4))
+# Wywołanie funkcji dla różnych wartości max_step (najlepiej wygląda jak się zminimalizuje tą kartę z "Environment/History itd... [jeśli poniższy kod wrzucimy do R-Studio, wówczas będzie nasz rysunek "wypełniać" i będzie to przypominać animację, ze względu na zastosowanie sys.sleep])
+max_steps <- c(10000, 50000, 100000,400000)
+for (step in max_steps) {
+  paprotka(step)
+  Sys.sleep(0.2)
+}
+```
+
+## 3. Analiza danych z pomiaru wiatru
+
+### 1. Wczytywanie danych
+
+Poniższy kod obrazuje wczytywanie danych:
+
+```{r}
+library(readxl)
+dane_5 <- read_excel("C:/Users/wojti/Desktop/Pakiet R Laby/R2023_Szyszka_Wojciech_projekt/dane_5.xlsx")
+```
+
+### 2. Tworzenie ramek danych
+
+W poniższym kodzie tworzone są dwie ramki danych - jedna z "błędami" wynikającymi z problemów napotkanych przez anemometry ze względu na zbyt niską temperaturę, zbyt małą prędkość wiatru i zbyt małe odchylenie standardowe prędkości.
+
+```{r}
+#warunki wykluczające błędne wskazania anemometrów
+s1=which(dane_5$CH11Avg<=0.5 & dane_5$CH4SD<=0.1 & dane_5$CH4Avg<=0.5)
+s2=which(dane_5$CH11Avg<=0.5 & dane_5$CH5SD<=0.1 & dane_5$CH5Avg<=0.5)
+s3=which(dane_5$CH11Avg<=0.5 & dane_5$CH6SD<=0.1 & dane_5$CH6Avg<=0.5)
+#ramka danych bez usuniętych błędów
+dane1=data.frame(czas=dane_5$`Date & Time Stamp`,CH4=dane_5$CH4Avg,CH5=dane_5$CH5Avg,CH6=dane_5$CH6Avg,CH7=dane_5$CH7Avg)
+#ramka z usuniętymi błędami
+dane=dane_5[-s1,]
+dane=dane_5[-s2,]
+dane=dane_5[-s3,]
+dane=data.frame(czas=dane$`Date & Time Stamp`,CH4=dane$CH4Avg,CH5=dane$CH5Avg,CH6=dane$CH6Avg,CH7=dane$CH7Avg)
+sektor=c(80.62,60.53,40.73,78.30)
+sektor1 = NULL
+sektor1[dane$CH7<=45 | dane$CH7>315]='N'
+sektor1[dane$CH7>45 & dane$CH7<135]='E'
+sektor1[dane$CH7>=135 & dane$CH7<225]='S'
+sektor1[dane$CH7>=225 & dane$CH7<=315]='W'
+dane$CH7=sektor1
+```
+
+### 3. Wykres wskazań wszystkich anemometrów (z błędami)
+
+```{r}
+plot(dane1$czas,dane1$CH4,type = 'l', col="salmon", xlab = "data",ylab = "prędkość_wiatru")
+lines(dane1$czas,dane1$CH5, type='l',col="green4")
+lines(dane1$czas,dane1$CH6, type='l',col="aquamarine")
+legend("topright", legend = c("Anemo CH4", "Anemo CH5", "Anemo CH6"), col = c("salmon", "green4","aquamarine"), lwd = 2,cex=1)
+
+```
+
+Płaski odcinek między "sty 17" i "sty 24" wynika z tego, że anemometry nie działały prawidłowo ze względu na zamarznięcie co można zidentyfikować w danych poprzez sprawdzenie temperatury lub odchylenia standardowego lub mały odczyt prędkości. W celach dalszej analizy usunąłem wszystkie odczyty spełniające którykolwiek z powyższych warunków.
+
+### 4. Profil pionowy wiatru + wykres prędkości z prawa Hellmanna
+
+Wyznaczenie współczynników dla prawa Hellmanna i zdefiniowanie funkcji:
+
+```{r}
+omega=log(mean(dane$CH4)/mean(dane$CH6), base=sektor[1]/sektor[3])
+omega
+v_teo=mean(dane$CH4)*(sektor[2]/sektor[1])^(omega)
+v_teo
+mean(dane$CH5)
+a=mean(dane$CH4)
+f_pred_wiatr=function(h){
+  teo_sr_pred=a*(h/sektor[1])^(omega)
+  return(teo_sr_pred)
+}
+```
+
+Wykres prędkości z prawa Hellmanna oraz profil pionowy wiatru na jednym wykresie:
+
+```{r}
+wysokosci=c(10:130)
+plot(wysokosci,sapply(wysokosci,f_pred_wiatr),type='l',col='tomato4',xlab="wysokość", ylab="średnia_prędkość")
+points(sektor[1],mean(dane$CH4),col='navyblue',pch=11)
+points(sektor[2],mean(dane$CH5),col='green4',pch=11)
+points(sektor[3],mean(dane$CH6),col='salmon3',pch=11)
+legend("bottomright", legend = c("Prawo Hellmanna","AnemoAvg CH4", "AnemoAvg CH5", "AnemoAvg CH6"), col = c("tomato4","navyblue", "green4","salmon3"), lwd = 2,cex=1)
+```
+
+Zdefiniowanie funkcji dla prawa logarytmicznego i wyznaczenie jego współczynników:
+
+```{r}
+z0=1.3
+#drugie
+f_log_pred_wiatr=function(h){
+  teo_log_sr_pred=mean(dane$CH4)*log(h/z0,exp(1))/log(sektor[1]/z0,exp(1))
+  return(teo_log_sr_pred)
+}
+```
+
+Wykres z uwzględnionym prawem logarytmicznym i prawem Hellmanna:
+
+```{r}
+wysokosci=c(10:130)
+plot(wysokosci,sapply(wysokosci,f_pred_wiatr),type='l',col='tomato4',xlab="wysokość", ylab="średnia_prśdkość")
+points(sektor[1],mean(dane$CH4),col='navyblue',pch=11)
+points(sektor[2],mean(dane$CH5),col='green4',pch=11)
+points(sektor[3],mean(dane$CH6),col='salmon3',pch=11)
+lines(wysokosci,sapply(wysokosci,f_log_pred_wiatr),type='l',col='seagreen4')
+legend("bottomright", legend = c("Prawo Hellmanna","AnemoAvg CH4", "AnemoAvg CH5", "AnemoAvg CH6","Prawo logarytmiczne"), col = c("tomato4","navyblue", "green4","salmon3","seagreen"), lwd = 2,cex=1)
+
+```
+
+### 5. Histogram i estymacja parametrów Weibulla, wykres gęstości dla wszystkich anemometrów
+
+Sprawdzenie zakresów osiąganych wartości prędkości:
+
+```{r}
+summary(dane$CH4)
+summary(dane$CH5)
+summary(dane$CH6)
+```
+
+Histogramy odpowiadające kolejno anemometrom CH4, CH5, CH6:
+
+```{r}
+par(mfrow=c(1,3))
+hist(dane$CH4,breaks=seq(from=0.2,to=15.3,by=0.1),xlab = "predkosc",ylab="Częstotliwość",main = "Histogram CH4")
+hist(dane$CH5,breaks=seq(from=0.3,to=15.1,by=0.1),xlab = "predkosc",ylab="Częstotliwość",main = "Histogram CH5")
+hist(dane$CH6,breaks=seq(from=0.3,to=15.0,by=0.1),xlab = "predkosc",ylab="Częstotliwość",main = "Histogram CH6")
+```
+
+Pobranie oraz instalacja pakietu "EnvStats" potrzebnego do estymacji parametrów Weibulla:
+
+```{r}
+options(repos = c(CRAN = "http://cran.rstudio.com"))
+install.packages("EnvStats")
+library("EnvStats")
+```
+
+Estymacja parametrów:
+
+```{r}
+eweibull(dane$CH4)
+eweibull(dane$CH5)
+eweibull(dane$CH6)
+
+```
+
+Rysunki wykresów gęstości dla kolejnych anemometrów:
+
+```{r}
+par(mfrow=c(1,3))
+curve(dweibull(x, shape=2.160627, scale = 6.387532),ylab="dweibull", from=0, to=16)
+curve(dweibull(x, shape=2.214225, scale = 5.930312),ylab="dweibull", from=0, to=16)
+curve(dweibull(x, shape=2.192350, scale = 5.418429),ylab="dweibull", from=0, to=16)
+```
+
+### 6. Histogram średniej prędkości CH4 z podziałem na 4 sektory
+
+```{r}
+library(ggplot2)
+ggplot(dane, aes(x = CH4, fill = CH7)) +
+  geom_histogram(binwidth = 0.1, position = "dodge") +
+  facet_wrap(~CH7, scales = "free") +
+  labs(title = "Histogram prędkości CH4Avg z podziałem na 4 sektory",
+       x = "CH4",
+       y = "Liczba obserwacji")
+
+```
+
+### 7. Wykres prędkości CH4 z podziałem na sektory na jednym panelu
+
+```{r}
+ggplot(dane, aes(x=czas, y = CH4, color = CH7)) +
+  geom_point(size=0.7) +
+  labs(title = "Wykres prędkości CH4Avg z podziałem na sektory",
+       x = "data",
+       y = "prędkość") +
+  scale_color_manual(values = c("N" = "tomato2", "W" = "seagreen", "E" = "navyblue", "S" = "violetred1"))
+```
+
+### 8. Wykres ramka-wąsy prędkości CH4 z podziałem na sektory
+
+```{r}
+ggplot(dane, aes(x = CH7, y = CH4, fill = CH7)) +
+  geom_boxplot() +
+  labs(title = "Wykres ramka-wasy predkosci CH4 z podzialem na sektory",
+       x = "Sektor",
+       y = "predkosc") +
+  scale_fill_manual(values = c("N" = "tomato2", "W" = "seagreen", "E" = "navyblue", "S" = "violetred1")) +
+  facet_wrap(~CH7, scales = "free") +
+  theme_minimal()
+```
+
+## 4. Podsumowanie
+
+Podsumowując zajęcia na duży plus! Jestem bardzo zadowolony i chyba nie mam pomysłu co można by poprawiać. Może jedynie ten ggplot nieszczęsny - coś ciekawszego z nim porobić i jakoś w innej kolejności część rzeczy wprowadzać (?) Czasem się gubiłem w tym pliku i miałem wrażenie, że te "ważniejsze" rzeczy były później, a mniej ważne wcześniej. ALE może to być zaledwie moje losowe subiektywne spostrzeżenie nie mające zbyt wiele wspólnego z rzeczywistością...
+
+-   Najnudniejsza część - no chyba wychodzi na ten ggplot
+
+-   Najciekawsza część - z grubsza wszystko prócz ggplota
+
+-   Najtrudniejsza część - ciężko wskazać
+
+-   Największe moje osiągnięcie w R ale i nie tylko R ,a być może życiu - to ta wspaniała paproć która się narysowała powyżej...
